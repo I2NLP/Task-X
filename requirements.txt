@@ -1,0 +1,9 @@
+beautifulsoup4
+Markdown
+tqdm
+requests
+scikit-learn
+torch~=2.7.1
+accelerate
+transformers
+datasets
