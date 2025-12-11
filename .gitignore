@@ -193,3 +193,11 @@ logs_*.out
 
 
 .DS_Store
+
+# 允许提交特定的 .jsonl 文件 (加 ! 表示不忽略)
+*.jsonl
+!train_redacted.jsonl
+!dev_redacted.jsonl
+!train_rehydrated.jsonl
+!dev_rehydrated.jsonl
+!submission.jsonl
