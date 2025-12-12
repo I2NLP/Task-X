@@ -44,7 +44,7 @@ def main():
         'dropout': 0.3,
         'model_path': 'bert-lstm-attention-model/best_model.pt',
         'dev_file': 'dev_rehydrated.jsonl',
-        'output_file': 'submission.jsonl'
+        'output_file': 'submission_hybrid.jsonl'
     }
     
     id_to_label = {0: 'No', 1: 'Yes'}
