@@ -7,44 +7,30 @@ Usage:
 
 import json
 import torch
-from torch.utils.data import Dataset, DataLoader
-from transformers import BertTokenizerFast
-from tqdm import tqdm
 import zipfile
+from tqdm import tqdm
+from transformers import BertTokenizerFast
+from collections import Counter
 
 # Import model class from training script
-from train_hybrid import BertBiLSTMAttention, ConspiracyDataset
+from train_hybrid import BertBiLSTMAttention
 
 
 def load_test_data(file_path):
-    """Load test/dev data for inference."""
+    """Load test/dev data for inference (no labels needed)."""
     data = []
     with open(file_path, 'r') as f:
-        for line in f:
-            item = json.loads(line)
-            # Add dummy label if not present (for test set)
-            if 'conspiracy' not in item:
-                item['conspiracy'] = 'No'  # Dummy label
-            data.append(item)
+        for i, line in enumerate(f):
+            try:
+                item = json.loads(line)
+                sample_id = item.get("_id", f"sample_{i}")
+                data.append({
+                    "_id": sample_id,
+                    "text": item.get("text", "")
+                })
+            except json.JSONDecodeError:
+                print(f"Skipping invalid JSON line at index {i}")
     return data
-
-
-def inference(model, dataloader, device):
-    """Run inference and return predictions."""
-    model.eval()
-    all_preds = []
-    id_to_label = {0: 'No', 1: 'Yes'}
-    
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Inference"):
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            
-            logits, _ = model(input_ids, attention_mask)
-            preds = torch.argmax(logits, dim=1)
-            all_preds.extend([id_to_label[p.item()] for p in preds])
-    
-    return all_preds
 
 
 def main():
@@ -52,7 +38,6 @@ def main():
     CONFIG = {
         'bert_model': 'bert-base-uncased',
         'max_length': 256,
-        'batch_size': 32,
         'lstm_hidden_size': 256,
         'lstm_layers': 2,
         'num_attention_heads': 8,
@@ -61,6 +46,8 @@ def main():
         'dev_file': 'dev_rehydrated.jsonl',
         'output_file': 'submission.jsonl'
     }
+    
+    id_to_label = {0: 'No', 1: 'Yes'}
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -74,10 +61,6 @@ def main():
     # Tokenizer
     tokenizer = BertTokenizerFast.from_pretrained(CONFIG['bert_model'])
     
-    # Dataset and DataLoader
-    test_dataset = ConspiracyDataset(test_data, tokenizer, CONFIG['max_length'])
-    test_loader = DataLoader(test_dataset, batch_size=CONFIG['batch_size'], shuffle=False)
-    
     # Load model
     print("Loading model...")
     model = BertBiLSTMAttention(
@@ -89,22 +72,42 @@ def main():
     ).to(device)
     
     model.load_state_dict(torch.load(CONFIG['model_path'], map_location=device))
+    model.eval()
     print("Model loaded!")
     
     # Run inference
     print("Running inference...")
-    predictions = inference(model, test_loader, device)
+    predictions = []
     
-    # Create submission
-    print(f"Creating submission file: {CONFIG['output_file']}")
-    with open(CONFIG['output_file'], 'w') as f:
-        for item, pred in zip(test_data, predictions):
-            submission = {
+    with torch.no_grad():
+        for item in tqdm(test_data, desc="Inference"):
+            # Tokenize
+            encoding = tokenizer(
+                item['text'],
+                truncation=True,
+                padding='max_length',
+                max_length=CONFIG['max_length'],
+                return_tensors='pt'
+            )
+            
+            input_ids = encoding['input_ids'].to(device)
+            attention_mask = encoding['attention_mask'].to(device)
+            
+            # Predict
+            logits, _ = model(input_ids, attention_mask)
+            pred = torch.argmax(logits, dim=1).item()
+            
+            predictions.append({
                 '_id': item['_id'],
-                'conspiracy': pred,
-                'markers': []  # Empty for binary classification
-            }
-            f.write(json.dumps(submission) + '\n')
+                'conspiracy': id_to_label[pred],
+                'markers': []
+            })
+    
+    # Save submission
+    print(f"Saving predictions to {CONFIG['output_file']}...")
+    with open(CONFIG['output_file'], 'w') as f:
+        for pred in predictions:
+            f.write(json.dumps(pred) + '\n')
     
     # Create zip
     zip_file = 'submission_hybrid.zip'
@@ -112,9 +115,8 @@ def main():
         zf.write(CONFIG['output_file'])
     print(f"Created {zip_file}")
     
-    # Print prediction distribution
-    from collections import Counter
-    dist = Counter(predictions)
+    # Print distribution
+    dist = Counter(p['conspiracy'] for p in predictions)
     print(f"\nPrediction distribution: {dict(dist)}")
     print("\nDone! Submit submission_hybrid.zip to CodaBench.")
 
