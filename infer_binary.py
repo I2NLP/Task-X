@@ -16,7 +16,7 @@ from transformers import TrainingArguments
 # --- Configuration matching the training script ---
 MODEL_PATH = "distilbert-conspiracy-classification"
 TEST_FILE = "dev_rehydrated.jsonl"
-SUBMISSION_FILE = "submission.jsonl"
+SUBMISSION_FILE = "submission_data_aug.jsonl"
 MODEL_NAME = "distilbert-base-uncased"
 LABEL_MAP = {0: "No", 1: "Yes"}
 BATCH_SIZE = 64
