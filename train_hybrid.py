@@ -296,7 +296,7 @@ def main():
         'num_attention_heads': 8,
         'dropout': 0.3,
         'learning_rate': 2e-5,
-        'num_epochs': 5,
+        'num_epochs': 10,
         'warmup_ratio': 0.1,
         'freeze_bert': False,
         'train_file': 'train_rehydrated.jsonl',
