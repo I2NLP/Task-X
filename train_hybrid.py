@@ -21,11 +21,12 @@ from tqdm import tqdm
 class ConspiracyDataset(Dataset):
     """Dataset for conspiracy detection."""
     
-    def __init__(self, data, tokenizer, max_length=256):
+    def __init__(self, data, tokenizer, max_length=256, has_labels=True):
         self.data = data
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.label_map = {"No": 0, "Yes": 1}
+        self.has_labels = has_labels
     
     def __len__(self):
         return len(self.data)
@@ -33,7 +34,13 @@ class ConspiracyDataset(Dataset):
     def __getitem__(self, idx):
         item = self.data[idx]
         text = item['text']
-        label = self.label_map[item['conspiracy']]
+        
+        # Handle missing or None labels
+        conspiracy_label = item.get('conspiracy')
+        if self.has_labels and conspiracy_label in self.label_map:
+            label = self.label_map[conspiracy_label]
+        else:
+            label = 0  # Default label for inference
         
         encoding = self.tokenizer(
             text,
@@ -194,15 +201,24 @@ class BertBiLSTMAttention(nn.Module):
         return logits, attn_weights
 
 
-def load_data(file_path, exclude_labels=None):
+def load_data(file_path, exclude_labels=None, filter_none=True):
     """Load JSONL data."""
     exclude_labels = exclude_labels or []
     data = []
     with open(file_path, 'r') as f:
         for line in f:
             item = json.loads(line)
-            if item.get('conspiracy') not in exclude_labels:
-                data.append(item)
+            conspiracy = item.get('conspiracy')
+            
+            # Skip None values if filtering
+            if filter_none and conspiracy is None:
+                continue
+            
+            # Skip excluded labels
+            if conspiracy in exclude_labels:
+                continue
+                
+            data.append(item)
     return data
 
 
@@ -284,7 +300,6 @@ def main():
         'warmup_ratio': 0.1,
         'freeze_bert': False,
         'train_file': 'train_rehydrated.jsonl',
-        'dev_file': 'dev_rehydrated.jsonl',
         'output_dir': 'bert-lstm-attention-model',
         'exclude_labels': ["Can't tell"]
     }
@@ -296,19 +311,16 @@ def main():
     # Load data
     print("Loading data...")
     train_data = load_data(CONFIG['train_file'], exclude_labels=CONFIG['exclude_labels'])
-    dev_data = load_data(CONFIG['dev_file'], exclude_labels=CONFIG['exclude_labels'])
-    print(f"Train samples: {len(train_data)}, Dev samples: {len(dev_data)}")
+    print(f"Train samples: {len(train_data)}")
     
     # Tokenizer
     tokenizer = BertTokenizerFast.from_pretrained(CONFIG['bert_model'])
     
     # Datasets
     train_dataset = ConspiracyDataset(train_data, tokenizer, CONFIG['max_length'])
-    dev_dataset = ConspiracyDataset(dev_data, tokenizer, CONFIG['max_length'])
     
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], shuffle=True)
-    dev_loader = DataLoader(dev_dataset, batch_size=CONFIG['batch_size'], shuffle=False)
     
     # Model
     print("Initializing model...")
@@ -345,7 +357,6 @@ def main():
     
     # Training loop
     print("\nStarting training...")
-    best_f1 = 0
     
     for epoch in range(CONFIG['num_epochs']):
         print(f"\n{'='*50}")
@@ -355,23 +366,17 @@ def main():
         train_loss, train_f1 = train_epoch(model, train_loader, optimizer, scheduler, criterion, device)
         print(f"Train Loss: {train_loss:.4f}, Train F1: {train_f1:.4f}")
         
-        dev_loss, dev_f1, dev_preds, dev_labels = evaluate(model, dev_loader, criterion, device)
-        print(f"Dev Loss: {dev_loss:.4f}, Dev F1: {dev_f1:.4f}")
-        
-        if dev_f1 > best_f1:
-            best_f1 = dev_f1
-            torch.save(model.state_dict(), f"{CONFIG['output_dir']}/best_model.pt")
-            print(f"New best model saved! F1: {best_f1:.4f}")
+        # Save model each epoch
+        torch.save(model.state_dict(), f"{CONFIG['output_dir']}/model_epoch_{epoch+1}.pt")
     
     print(f"\n{'='*50}")
-    print(f"Training complete! Best Dev F1: {best_f1:.4f}")
+    print(f"Training complete!")
     print('='*50)
     
-    # Final evaluation with classification report
-    print("\nFinal Classification Report:")
-    print(classification_report(dev_labels, dev_preds, target_names=['No', 'Yes']))
+    # Save final model as best_model.pt for inference script
+    torch.save(model.state_dict(), f"{CONFIG['output_dir']}/best_model.pt")
     
-    # Save model
+    # Save model with config
     torch.save({
         'model_state_dict': model.state_dict(),
         'config': CONFIG
