@@ -299,7 +299,7 @@ def main():
         'num_epochs': 10,
         'warmup_ratio': 0.1,
         'freeze_bert': False,
-        'train_file': 'train_rehydrated.jsonl',
+        'train_file': 'data/augmented/train_llama_augmented.jsonl',
         'output_dir': 'bert-lstm-attention-model',
         'exclude_labels': ["Can't tell"]
     }
