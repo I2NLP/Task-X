@@ -1,13 +1,11 @@
 """
-Hybrid BERT-CNN model for conspiracy detection.
+Hybrid BERT-CNN model for conspiracy detection (no validation split version).
 
 Architecture:
     Input -> BERT -> Multi-scale CNN (multiple filter sizes) -> Classification
 
-CNNs capture local n-gram patterns that might indicate conspiracy language.
-
 Usage:
-    python train_bert_cnn.py
+    python train_bert_cnn_no_val.py
 """
 
 import json
@@ -17,8 +15,7 @@ import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizerFast, BertModel, get_linear_schedule_with_warmup
-from sklearn.metrics import f1_score, classification_report
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 
@@ -38,7 +35,6 @@ class ConspiracyDataset(Dataset):
         item = self.data[idx]
         text = item['text']
         
-        # Handle missing labels
         conspiracy_label = item.get('conspiracy')
         if conspiracy_label in self.label_map:
             label = self.label_map[conspiracy_label]
@@ -64,14 +60,11 @@ class BertCNN(nn.Module):
     """
     BERT + Multi-scale CNN model.
     
-    Architecture:
-        BERT embeddings -> Multiple parallel CNN filters -> Max pooling -> Classifier
-    
     The CNN filters of different sizes capture n-gram patterns:
-        - Filter size 2: bigrams ("they hide", "cover up")
-        - Filter size 3: trigrams ("the government is", "don't want you")
-        - Filter size 4: 4-grams ("they don't want you")
-        - Filter size 5: 5-grams (longer phrases)
+        - Filter size 2: bigrams
+        - Filter size 3: trigrams
+        - Filter size 4: 4-grams
+        - Filter size 5: 5-grams
     """
     
     def __init__(
@@ -85,16 +78,13 @@ class BertCNN(nn.Module):
     ):
         super().__init__()
         
-        # BERT encoder
         self.bert = BertModel.from_pretrained(bert_model_name)
-        bert_hidden_size = self.bert.config.hidden_size  # 768 for bert-base
+        bert_hidden_size = self.bert.config.hidden_size
         
-        # Optionally freeze BERT
         if freeze_bert:
             for param in self.bert.parameters():
                 param.requires_grad = False
         
-        # Multi-scale CNN layers
         self.convs = nn.ModuleList([
             nn.Conv1d(
                 in_channels=bert_hidden_size,
@@ -104,10 +94,8 @@ class BertCNN(nn.Module):
             for fs in filter_sizes
         ])
         
-        # Total features from all CNN filters
         total_filters = num_filters * len(filter_sizes)
         
-        # Classifier
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Sequential(
             nn.Linear(total_filters, total_filters // 2),
@@ -117,35 +105,28 @@ class BertCNN(nn.Module):
         )
     
     def forward(self, input_ids, attention_mask):
-        # BERT encoding
         bert_output = self.bert(
             input_ids=input_ids,
             attention_mask=attention_mask
         )
-        sequence_output = bert_output.last_hidden_state  # (batch, seq_len, 768)
+        sequence_output = bert_output.last_hidden_state
         
-        # Transpose for CNN: (batch, 768, seq_len)
         x = sequence_output.transpose(1, 2)
         
-        # Apply each CNN filter and max-pool
         conv_outputs = []
         for conv in self.convs:
-            # Conv -> ReLU -> Max pool over sequence
-            conv_out = F.relu(conv(x))  # (batch, num_filters, seq_len - filter_size + 1)
-            pooled = F.max_pool1d(conv_out, conv_out.size(2)).squeeze(2)  # (batch, num_filters)
+            conv_out = F.relu(conv(x))
+            pooled = F.max_pool1d(conv_out, conv_out.size(2)).squeeze(2)
             conv_outputs.append(pooled)
         
-        # Concatenate all filter outputs
-        cat = torch.cat(conv_outputs, dim=1)  # (batch, num_filters * len(filter_sizes))
-        
-        # Classify
+        cat = torch.cat(conv_outputs, dim=1)
         cat = self.dropout(cat)
         logits = self.classifier(cat)
         
         return logits
 
 
-def load_data(file_path, exclude_labels=None, filter_none=True):
+def load_data(file_path, exclude_labels=None):
     """Load JSONL data."""
     exclude_labels = exclude_labels or []
     data = []
@@ -154,7 +135,7 @@ def load_data(file_path, exclude_labels=None, filter_none=True):
             item = json.loads(line)
             conspiracy = item.get('conspiracy')
             
-            if filter_none and conspiracy is None:
+            if conspiracy is None:
                 continue
             if conspiracy in exclude_labels:
                 continue
@@ -199,33 +180,6 @@ def train_epoch(model, dataloader, optimizer, scheduler, criterion, device):
     return avg_loss, f1
 
 
-def evaluate(model, dataloader, criterion, device):
-    """Evaluate the model."""
-    model.eval()
-    total_loss = 0
-    all_preds = []
-    all_labels = []
-    
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating"):
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['label'].to(device)
-            
-            logits = model(input_ids, attention_mask)
-            loss = criterion(logits, labels)
-            
-            total_loss += loss.item()
-            preds = torch.argmax(logits, dim=1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-    
-    avg_loss = total_loss / len(dataloader)
-    f1 = f1_score(all_labels, all_preds, average='weighted')
-    
-    return avg_loss, f1, all_preds, all_labels
-
-
 def main():
     # Configuration
     CONFIG = {
@@ -236,10 +190,9 @@ def main():
         'filter_sizes': [2, 3, 4, 5],
         'dropout': 0.4,
         'learning_rate': 2e-5,
-        'num_epochs': 15,
+        'num_epochs': 10,  # Fixed epochs like BERT-LSTM run
         'warmup_ratio': 0.1,
         'freeze_bert': False,
-        'early_stopping_patience': 3,
         'train_file': 'train_rehydrated.jsonl',
         'output_dir': 'bert-cnn-model',
         'exclude_labels': ["Can't tell"]
@@ -253,29 +206,19 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Load data
+    # Load data (full dataset, no split)
     print("Loading data...")
-    all_data = load_data(CONFIG['train_file'], exclude_labels=CONFIG['exclude_labels'])
-    
-    # Split into train/val (85/15)
-    train_data, val_data = train_test_split(
-        all_data, 
-        test_size=0.15, 
-        random_state=42, 
-        stratify=[d['conspiracy'] for d in all_data]
-    )
-    print(f"Train samples: {len(train_data)}, Validation samples: {len(val_data)}")
+    train_data = load_data(CONFIG['train_file'], exclude_labels=CONFIG['exclude_labels'])
+    print(f"Train samples: {len(train_data)}")
     
     # Tokenizer
     tokenizer = BertTokenizerFast.from_pretrained(CONFIG['bert_model'])
     
-    # Datasets
+    # Dataset
     train_dataset = ConspiracyDataset(train_data, tokenizer, CONFIG['max_length'])
-    val_dataset = ConspiracyDataset(val_data, tokenizer, CONFIG['max_length'])
     
-    # Dataloaders
+    # Dataloader
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], shuffle=False)
     
     # Model
     print("Initializing BERT-CNN model...")
@@ -309,10 +252,8 @@ def main():
     warmup_steps = int(total_steps * CONFIG['warmup_ratio'])
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
     
-    # Training loop with early stopping
+    # Training loop
     print("\nStarting training...")
-    best_val_f1 = 0
-    patience_counter = 0
     
     for epoch in range(CONFIG['num_epochs']):
         print(f"\n{'='*50}")
@@ -321,39 +262,15 @@ def main():
         
         train_loss, train_f1 = train_epoch(model, train_loader, optimizer, scheduler, criterion, device)
         print(f"Train Loss: {train_loss:.4f}, Train F1: {train_f1:.4f}")
-        
-        # Validation
-        val_loss, val_f1, val_preds, val_labels = evaluate(model, val_loader, criterion, device)
-        print(f"Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}")
-        
-        # Check for improvement
-        if val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            patience_counter = 0
-            torch.save(model.state_dict(), f"{CONFIG['output_dir']}/best_model.pt")
-            print(f"✓ New best model saved! Val F1: {best_val_f1:.4f}")
-        else:
-            patience_counter += 1
-            print(f"✗ No improvement. Patience: {patience_counter}/{CONFIG['early_stopping_patience']}")
-        
-        # Early stopping check
-        if patience_counter >= CONFIG['early_stopping_patience']:
-            print(f"\n⚠ Early stopping triggered after {epoch + 1} epochs!")
-            break
     
     print(f"\n{'='*50}")
-    print(f"Training complete! Best Val F1: {best_val_f1:.4f}")
+    print(f"Training complete!")
     print('='*50)
     
-    # Load best model for final evaluation
-    model.load_state_dict(torch.load(f"{CONFIG['output_dir']}/best_model.pt"))
-    val_loss, val_f1, val_preds, val_labels = evaluate(model, val_loader, criterion, device)
+    # Save final model
+    torch.save(model.state_dict(), f"{CONFIG['output_dir']}/best_model.pt")
     
-    # Final classification report
-    print("\nFinal Classification Report (Validation Set):")
-    print(classification_report(val_labels, val_preds, target_names=['No', 'Yes']))
-    
-    # Save config
+    # Save model with config
     torch.save({
         'model_state_dict': model.state_dict(),
         'config': CONFIG
