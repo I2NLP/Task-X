@@ -12,7 +12,7 @@ from tqdm import tqdm
 from transformers import BertTokenizerFast
 from collections import Counter
 
-from train_hybrid_3class import BertBiLSTMAttention, NUM_CLASSES
+from train_hybrid_3 import BertBiLSTMAttention, NUM_CLASSES
 
 # 3-class mapping
 ID_TO_LABEL = {0: "No", 1: "Yes", 2: "Can't tell"}
