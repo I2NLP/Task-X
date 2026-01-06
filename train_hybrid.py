@@ -5,7 +5,9 @@ Architecture:
     Input -> BERT -> BiLSTM -> Multi-Head Attention -> Classification
 
 Usage:
-    python train_hybrid.py
+    python train_hybrid.py --train_file train_rehydrated.jsonl
+    python train_hybrid.py --train_file data/augmented/train_bloomz_conspiracy.jsonl
+    python train_hybrid.py --train_file data/augmented/train_llama3b_conspiracy.jsonl --epochs 5
 """
 
 import json
@@ -286,27 +288,42 @@ def evaluate(model, dataloader, criterion, device):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Train BERT-LSTM-Attention model')
+    parser.add_argument('--train_file', default='train_rehydrated.jsonl', help='Training data file')
+    parser.add_argument('--output_dir', default='bert-lstm-attention-model', help='Output directory')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size')
+    parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate')
+    parser.add_argument('--dropout', type=float, default=0.3, help='Dropout rate')
+    args = parser.parse_args()
+    
     # Configuration
     CONFIG = {
         'bert_model': 'bert-base-uncased',
         'max_length': 256,
-        'batch_size': 16,
+        'batch_size': args.batch_size,
         'lstm_hidden_size': 256,
         'lstm_layers': 2,
         'num_attention_heads': 8,
-        'dropout': 0.3,
-        'learning_rate': 2e-5,
-        'num_epochs': 10,
+        'dropout': args.dropout,
+        'learning_rate': args.lr,
+        'num_epochs': args.epochs,
         'warmup_ratio': 0.1,
         'freeze_bert': False,
-        'train_file': 'data/augmented/train_llama_augmented.jsonl',
-        'output_dir': 'bert-lstm-attention-model',
+        'train_file': args.train_file,
+        'output_dir': args.output_dir,
         'exclude_labels': ["Can't tell"]
     }
+    
+    # Create output directory
+    import os
+    os.makedirs(CONFIG['output_dir'], exist_ok=True)
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    print(f"Training file: {CONFIG['train_file']}")
     
     # Load data
     print("Loading data...")
@@ -385,6 +402,4 @@ def main():
 
 
 if __name__ == '__main__':
-    import os
-    os.makedirs('bert-lstm-attention-model', exist_ok=True)
     main()
