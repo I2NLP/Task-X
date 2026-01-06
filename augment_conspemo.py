@@ -128,36 +128,49 @@ def generate_with_chat_template(model, tokenizer, text, prompt_type='conspiracy'
 def extract_paraphrase(full_output, prompt, original_text):
     """Extract the paraphrased text from model output."""
     
-    # Method 1: Remove the prompt from output
-    if prompt in full_output:
-        result = full_output[len(prompt):].strip()
-    else:
-        # Try to find where the response starts
-        result = full_output
+    result = full_output
     
-    # Method 2: Look for common markers and extract after them
-    markers = [
-        "Rewritten version:", "Rewritten:", "assistant", 
-        "Here is the rewritten", "Here's the rewritten"
+    # Method 1: Find the assistant's response after "Rewritten version:assistant"
+    # This handles the Llama format: "Rewritten version:assistant\n\nActual response..."
+    patterns_to_split = [
+        "Rewritten version:assistant",
+        "Rewritten:assistant", 
+        "assistant\n\n",
+        "assistant\n",
+        "Rewritten version:\n",
+        "Rewritten:\n",
     ]
     
-    for marker in markers:
-        if marker in result:
-            parts = result.split(marker)
+    for pattern in patterns_to_split:
+        if pattern in result:
+            parts = result.split(pattern)
             if len(parts) > 1:
                 result = parts[-1].strip()
                 break
     
-    # Method 3: Remove the original text if it appears at the start
-    if result.startswith(original_text[:50]):
-        result = result[len(original_text):].strip()
+    # Method 2: If we still have the original text at the start, remove it
+    # Sometimes output is: "original text...Rewritten version:assistant\n\nparaphrase"
+    if original_text[:30] in result:
+        # Find where original text ends and paraphrase begins
+        idx = result.find(original_text[:30])
+        if idx >= 0:
+            # Look for the paraphrase after the original
+            remaining = result[idx + len(original_text[:30]):]
+            # Find actual start of paraphrase (after markers)
+            for marker in ["Rewritten version:assistant", "Rewritten:", "assistant"]:
+                if marker in remaining:
+                    result = remaining.split(marker)[-1].strip()
+                    break
     
-    # Clean up: Take only the FIRST paraphrase (before "Or," or "Alternatively")
+    # Method 3: Clean up any leading newlines or whitespace
+    result = result.strip()
+    
+    # Take only the FIRST paraphrase (before "Or," or "Alternatively")
     stop_patterns = [
         "\n\nOr,", "\nOr,", "Or, alternatively", "Alternatively,",
         "\n\nOr ", "\nOr ", "\n\nNote:", "\nNote:",
         "\n\nHere's another", "\nHere's another",
-        "\n\n---", "\n---"
+        "\n\n---", "\n---", "\n\nI hope", "\nI hope"
     ]
     
     for pattern in stop_patterns:
@@ -167,20 +180,30 @@ def extract_paraphrase(full_output, prompt, original_text):
     # Remove leading/trailing quotes
     result = result.strip('"\'')
     
-    # Remove any remaining prompt fragments
+    # Remove any remaining prompt fragments at the START
     prompt_fragments = [
         "Please rewrite", "Keep the exact same", "Do not soften",
-        "Content:", "Text:", "Rewritten:"
+        "Content:", "Text:", "Rewritten:", "Here is", "Here's"
     ]
     for frag in prompt_fragments:
-        if result.startswith(frag):
-            return None
+        if result.lower().startswith(frag.lower()):
+            # Find the actual content after the fragment
+            lines = result.split('\n')
+            if len(lines) > 1:
+                result = '\n'.join(lines[1:]).strip()
+            else:
+                return None
     
-    # Final cleanup - take first paragraph if multiple
-    if "\n\n" in result:
-        result = result.split("\n\n")[0].strip()
+    # Final cleanup - if multiple paragraphs, take first substantial one
+    paragraphs = [p.strip() for p in result.split("\n\n") if p.strip()]
+    if paragraphs:
+        # Take first paragraph that's long enough
+        for p in paragraphs:
+            if len(p.split()) >= 5:
+                result = p
+                break
     
-    return result if result else None
+    return result if result and len(result.split()) >= 5 else None
 
 
 def validate_output(original, rewritten):
