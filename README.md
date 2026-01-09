@@ -14,6 +14,7 @@ Scripts to facilitate participation in the 2026 Semeval Task 10: PsyCoMark -- Ps
 1. run `python train_binary.py` (~6 minutes on gpu) 
 2. run `python infer_binary.py`
 3. zip the submission `submission.jsonl` --> `submission.zip`
+   by running 'zip submission.zip submission.jsonl'
 4. go to the [detection task on codabench](https://www.codabench.org/competitions/10749/)
    1. go to the "my submissions" tab 
    2. upload the zip file
