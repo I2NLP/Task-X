@@ -3,7 +3,7 @@ from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassific
 from transformers import TrainingArguments, Trainer
 from datasets import Dataset
 import numpy as np
-
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 def load_and_filter_data(file_path):
     """Loads data from a JSON file and filters out entries with 'Can't tell'."""
@@ -49,12 +49,14 @@ def save_predictions(trainer, test_dataset, output_file):
 
 if __name__ == "__main__":
     train_file = "train_rehydrated.jsonl"
-    model_name = "distilbert-base-uncased"
+    # model_name = "distilbert-base-uncased"
+    model_name = "lzw1008/ConspEmoLLM-v2"
+
     output_dir = "distilbert-conspiracy-classification"
     label_to_id = {"No": 0, "Yes": 1}
     id_to_label = {0: "No", 1: "Yes"}
     num_labels = len(label_to_id)
-    batch_size = 16
+    batch_size = 16 # 16
     learning_rate = 2e-5
     num_epochs = 10
 
@@ -65,15 +67,19 @@ if __name__ == "__main__":
     train_dataset = Dataset.from_list(train_data)
 
     # Load tokenizer
-    tokenizer = DistilBertTokenizerFast.from_pretrained(model_name)
+    # tokenizer = DistilBertTokenizerFast.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     # Tokenize and encode labels
     tokenized_train_dataset = tokenize_data(train_dataset, tokenizer)
     encoded_train_dataset = encode_labels(tokenized_train_dataset, label_to_id)
 
     # Load the model
-    model = DistilBertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, id2label=id_to_label,
-                                                                label2id=label_to_id)
+    # model = DistilBertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, id2label=id_to_label,
+    #                                                             label2id=label_to_id)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, id2label=id_to_label,
+                                                                 label2id=label_to_id)
+
 
     # Define training arguments
     training_args = TrainingArguments(
