@@ -3,11 +3,13 @@ Inference script for BERT-BiLSTM-MultiHeadAttention model.
 
 Usage:
     python infer_hybrid.py
+    python infer_hybrid.py --dev_file test_rehydrated.jsonl --zip_name submission_test.zip
 """
 
 import json
 import torch
 import zipfile
+import argparse
 from tqdm import tqdm
 from transformers import BertTokenizerFast
 from collections import Counter
@@ -34,6 +36,18 @@ def load_test_data(file_path):
 
 
 def main():
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Inference for BERT-LSTM-Attention model')
+    parser.add_argument('--model_path', default='bert-lstm-attention-model/best_model.pt', 
+                        help='Path to trained model')
+    parser.add_argument('--dev_file', default='dev_rehydrated.jsonl', 
+                        help='Dev/test data file')
+    parser.add_argument('--output_file', default='submission.jsonl', 
+                        help='Output submission file')
+    parser.add_argument('--zip_name', default='submission.zip', 
+                        help='Output zip file name')
+    args = parser.parse_args()
+    
     # Configuration
     CONFIG = {
         'bert_model': 'bert-base-uncased',
@@ -42,9 +56,9 @@ def main():
         'lstm_layers': 2,
         'num_attention_heads': 8,
         'dropout': 0.3,
-        'model_path': 'bert-lstm-attention-model/best_model.pt',
-        'dev_file': 'dev_rehydrated.jsonl',
-        'output_file': 'submission_hybrid.jsonl'
+        'model_path': args.model_path,
+        'dev_file': args.dev_file,
+        'output_file': args.output_file
     }
     
     id_to_label = {0: 'No', 1: 'Yes'}
@@ -62,7 +76,7 @@ def main():
     tokenizer = BertTokenizerFast.from_pretrained(CONFIG['bert_model'])
     
     # Load model
-    print("Loading model...")
+    print(f"Loading model from {CONFIG['model_path']}...")
     model = BertBiLSTMAttention(
         bert_model_name=CONFIG['bert_model'],
         lstm_hidden_size=CONFIG['lstm_hidden_size'],
@@ -109,16 +123,16 @@ def main():
         for pred in predictions:
             f.write(json.dumps(pred) + '\n')
     
-    # Create zip
-    zip_file = 'submission_hybrid.zip'
+    # Create zip (always name file 'submission.jsonl' inside zip for CodaBench)
+    zip_file = args.zip_name
     with zipfile.ZipFile(zip_file, 'w') as zf:
-        zf.write(CONFIG['output_file'])
+        zf.write(CONFIG['output_file'], 'submission.jsonl')
     print(f"Created {zip_file}")
     
     # Print distribution
     dist = Counter(p['conspiracy'] for p in predictions)
     print(f"\nPrediction distribution: {dict(dist)}")
-    print("\nDone! Submit submission_hybrid.zip to CodaBench.")
+    print(f"\nDone! Submit {zip_file} to CodaBench.")
 
 
 if __name__ == '__main__':
