@@ -15,7 +15,7 @@ from transformers import BertTokenizerFast
 from collections import Counter
 
 # Import model class from training script
-from train_bert_cnn_attention_model import BertCNNAttention
+from train_bert_cnn import BertCNNAttention
 
 
 def load_test_data(file_path):
