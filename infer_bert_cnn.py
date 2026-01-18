@@ -1,19 +1,21 @@
 """
-Inference script for BERT-CNN model.
+Inference script for BERT-CNN-Attention model.
 
 Usage:
-    python infer_bert_cnn.py
+    python infer_bert_cnn_attention.py
+    python infer_bert_cnn_attention.py --dev_file test_rehydrated.jsonl --zip_name submission_cnn_attn.zip
 """
 
 import json
 import torch
 import zipfile
+import argparse
 from tqdm import tqdm
 from transformers import BertTokenizerFast
 from collections import Counter
 
 # Import model class from training script
-from train_bert_cnn import BertCNN
+from train_bert_cnn_attention import BertCNNAttention
 
 
 def load_test_data(file_path):
@@ -34,16 +36,28 @@ def load_test_data(file_path):
 
 
 def main():
-    # Configuration - must match training
+    parser = argparse.ArgumentParser(description='Inference for BERT-CNN-Attention model')
+    parser.add_argument('--model_path', default='bert-cnn-attention-model/best_model.pt', 
+                        help='Path to trained model')
+    parser.add_argument('--dev_file', default='dev_rehydrated.jsonl', 
+                        help='Dev/test data file')
+    parser.add_argument('--output_file', default='submission.jsonl', 
+                        help='Output submission file')
+    parser.add_argument('--zip_name', default='submission.zip', 
+                        help='Output zip file name')
+    args = parser.parse_args()
+    
+    # Configuration (must match training)
     CONFIG = {
         'bert_model': 'bert-base-uncased',
         'max_length': 256,
         'num_filters': 128,
         'filter_sizes': [2, 3, 4, 5],
+        'num_attention_heads': 4,
         'dropout': 0.4,
-        'model_path': 'bert-cnn-model/best_model.pt',
-        'dev_file': 'dev_rehydrated.jsonl',
-        'output_file': 'submission.jsonl'
+        'model_path': args.model_path,
+        'dev_file': args.dev_file,
+        'output_file': args.output_file
     }
     
     id_to_label = {0: 'No', 1: 'Yes'}
@@ -61,11 +75,12 @@ def main():
     tokenizer = BertTokenizerFast.from_pretrained(CONFIG['bert_model'])
     
     # Load model
-    print("Loading model...")
-    model = BertCNN(
+    print(f"Loading model from {CONFIG['model_path']}...")
+    model = BertCNNAttention(
         bert_model_name=CONFIG['bert_model'],
         num_filters=CONFIG['num_filters'],
         filter_sizes=CONFIG['filter_sizes'],
+        num_attention_heads=CONFIG['num_attention_heads'],
         dropout=CONFIG['dropout']
     ).to(device)
     
@@ -92,7 +107,7 @@ def main():
             attention_mask = encoding['attention_mask'].to(device)
             
             # Predict
-            logits = model(input_ids, attention_mask)
+            logits, _ = model(input_ids, attention_mask)
             pred = torch.argmax(logits, dim=1).item()
             
             predictions.append({
@@ -107,16 +122,16 @@ def main():
         for pred in predictions:
             f.write(json.dumps(pred) + '\n')
     
-    # Create zip
-    zip_file = 'submission_bert_cnn.zip'
+    # Create zip (always name file 'submission.jsonl' inside zip for CodaBench)
+    zip_file = args.zip_name
     with zipfile.ZipFile(zip_file, 'w') as zf:
-        zf.write(CONFIG['output_file'], 'submission.jsonl')  # Ensure correct name in zip
+        zf.write(CONFIG['output_file'], 'submission.jsonl')
     print(f"Created {zip_file}")
     
     # Print distribution
     dist = Counter(p['conspiracy'] for p in predictions)
     print(f"\nPrediction distribution: {dict(dist)}")
-    print("\nDone! Submit submission_bert_cnn.zip to CodaBench.")
+    print(f"\nDone! Submit {zip_file} to CodaBench.")
 
 
 if __name__ == '__main__':
